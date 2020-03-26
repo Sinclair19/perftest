@@ -15,6 +15,7 @@
 #include <sys/ipc.h>
 #include <sys/shm.h>
 #include <pthread.h>
+#include <assert.h>
 #if defined(__FreeBSD__)
 #include <sys/stat.h>
 #endif
@@ -999,6 +1000,9 @@ void alloc_ctx(struct pingpong_context *ctx,struct perftest_parameters *user_par
 	}
 	if (user_param->mac_fwd == ON )
 		ctx->cycle_buffer = user_param->size * user_param->rx_depth;
+	ALLOCATE(ctx->balloon_buf, void *, user_param->balloon_mrs);
+	ALLOCATE(ctx->balloon_mr, struct ibv_mr *, user_param->balloon_mrs);
+	ctx->balloon_mem = NULL;
 
 	ctx->size = user_param->size;
 
@@ -1156,6 +1160,13 @@ int destroy_ctx(struct pingpong_context *ctx,
 		free(ctx->ctrl_wr);
 	}
 
+	for (i = 0; i < user_param->balloon_mrs; i++) {
+		if (ibv_dereg_mr(ctx->balloon_mr[i])) {
+			fprintf(stderr, "Failed to deregister ballon MR#%d\n", dereg_counter + 1 + i);
+			test_result = 1;
+		}
+	}
+
 	if (ibv_dealloc_pd(ctx->pd)) {
 		fprintf(stderr, "Failed to deallocate PD - %s\n", strerror(errno));
 		test_result = 1;
@@ -1191,7 +1202,17 @@ int destroy_ctx(struct pingpong_context *ctx,
 				free(ctx->buf[i]);
 			}
 		}
+
+		for (i = 0; i < user_param->balloon_mrs; i++) {
+			if (user_param->use_hugepages) {
+				shmdt(ctx->balloon_buf[i]);
+			} else {
+				free(ctx->balloon_buf[i]);
+			}
+		}
 	}
+	free(ctx->balloon_mem);
+
 	free(ctx->qp);
 	#ifdef HAVE_IBV_WR_API
 	free(ctx->qpx);
@@ -1520,7 +1541,7 @@ int create_single_mr(struct pingpong_context *ctx, struct perftest_parameters *u
 			posix_memalign(&ctx->buf[qp_index], user_param->cycle_buffer, ctx->buff_size);
 			#else
 			if (user_param->use_hugepages) {
-				if (alloc_hugepage_region(ctx, qp_index) != SUCCESS){
+				if (alloc_hugepage_region(ctx, &ctx->buf[qp_index]) != SUCCESS){
 					fprintf(stderr, "Failed to allocate hugepage region.\n");
 					return FAILURE;
 				}
@@ -1642,12 +1663,184 @@ int create_mr(struct pingpong_context *ctx, struct perftest_parameters *user_par
 /******************************************************************************
  *
  ******************************************************************************/
+int create_one_balloon_mr(struct pingpong_context *ctx, struct perftest_parameters *user_param, int mr_index)
+{
+	int i;
+	int flags = IBV_ACCESS_LOCAL_WRITE;
+
+#ifdef HAVE_VERBS_EXP
+	struct ibv_exp_reg_mr_in reg_mr_exp_in;
+	uint64_t exp_flags = IBV_EXP_ACCESS_LOCAL_WRITE;
+#endif
+
+	if (user_param->mmap_file != NULL) {
+		fprintf(stderr, "Ballooning is not supported with mmap'ed files.\n");
+		return FAILURE;
+	}
+
+	/* Allocating buffer for data, in case driver not support contig pages. */
+	if (ctx->is_contig_supported == FAILURE) {
+		#if defined(__FreeBSD__)
+		posix_memalign(&ctx->balloon_buf[mr_index], user_param->cycle_buffer, ctx->buff_size);
+		#else
+		if (user_param->use_hugepages) {
+			if (alloc_hugepage_region(ctx, &ctx->balloon_buf[mr_index]) != SUCCESS){
+				fprintf(stderr, "Failed to allocate hugepage region.\n");
+				return FAILURE;
+			}
+			memset(ctx->balloon_buf[mr_index], 0, ctx->buff_size);
+		} else if  (ctx->is_contig_supported == FAILURE) {
+			ctx->balloon_buf[mr_index] = memalign(user_param->cycle_buffer, ctx->buff_size);
+		}
+		#endif
+		if (!ctx->balloon_buf[mr_index]) {
+			fprintf(stderr, "Couldn't allocate work buf.\n");
+			return FAILURE;
+		}
+
+		memset(ctx->balloon_buf[mr_index], 0, ctx->buff_size);
+	} else {
+		ctx->balloon_buf[mr_index] = NULL;
+		#ifdef HAVE_VERBS_EXP
+		exp_flags |= IBV_EXP_ACCESS_ALLOCATE_MR;
+		#else
+		flags |= (1 << 5);
+		#endif
+	}
+
+	if (user_param->verb == WRITE) {
+		flags |= IBV_ACCESS_REMOTE_WRITE;
+		#ifdef HAVE_VERBS_EXP
+		exp_flags |= IBV_EXP_ACCESS_REMOTE_WRITE;
+		#endif
+	} else if (user_param->verb == READ) {
+		flags |= IBV_ACCESS_REMOTE_READ;
+		#ifdef HAVE_VERBS_EXP
+		exp_flags |= IBV_EXP_ACCESS_REMOTE_READ;
+		#endif
+		if (user_param->transport_type == IBV_TRANSPORT_IWARP)
+			flags |= IBV_ACCESS_REMOTE_WRITE;
+		#ifdef HAVE_VERBS_EXP
+		exp_flags |= IBV_EXP_ACCESS_REMOTE_WRITE;
+		#endif
+	} else if (user_param->verb == ATOMIC) {
+		flags |= IBV_ACCESS_REMOTE_ATOMIC;
+		#ifdef HAVE_VERBS_EXP
+		exp_flags |= IBV_EXP_ACCESS_REMOTE_ATOMIC;
+		#endif
+	}
+
+	/* Allocating Memory region and assigning our buffer to it. */
+#ifdef HAVE_VERBS_EXP
+	if (ctx->is_contig_supported == SUCCESS || user_param->use_odp) {
+		reg_mr_exp_in.pd = ctx->pd;
+		reg_mr_exp_in.addr = ctx->balloon_buf[mr_index];
+		reg_mr_exp_in.length = ctx->buff_size;
+		reg_mr_exp_in.exp_access = exp_flags;
+		reg_mr_exp_in.comp_mask = 0;
+
+		ctx->balloon_mr[mr_index] = ibv_exp_reg_mr(&reg_mr_exp_in);
+	}
+	else
+		ctx->balloon_mr[mr_index] = ibv_reg_mr(ctx->pd, ctx->balloon_buf[mr_index], ctx->buff_size, flags);
+#else
+	ctx->balloon_mr[mr_index] = ibv_reg_mr(ctx->pd, ctx->balloon_buf[mr_index], ctx->buff_size, flags);
+#endif
+
+	if (!ctx->balloon_mr[mr_index]) {
+		fprintf(stderr, "Couldn't allocate MR\n");
+		return FAILURE;
+	}
+
+	/* Initialize buffer with random numbers except in WRITE_LAT test that it 0's */
+	if (!user_param->use_cuda) {
+		if (user_param->verb == WRITE && user_param->tst == LAT) {
+			memset(ctx->balloon_buf[mr_index], 0, ctx->buff_size);
+		} else {
+			for (i = 0; i < ctx->buff_size; i++) {
+				((char*)ctx->balloon_buf[mr_index])[i] = (char)rand();
+			}
+		}
+	}
+
+
+	return SUCCESS;
+}
+
+int create_balloon_memory(struct pingpong_context *ctx, struct perftest_parameters *user_param)
+{
+	int i, balloon_size;
+
+	if (!user_param->balloon_mem) {
+		return SUCCESS;
+	}
+
+	balloon_size = user_param->balloon_mem * (1 << 20);
+
+	assert(balloon_size % ctx->cache_line_size == 0);
+
+	if (user_param->mmap_file != NULL) {
+		fprintf(stderr, "Ballooning is not supported with mmap'ed files.\n");
+		return FAILURE;
+	}
+
+	/* Allocating buffer for data, in case driver not support contig pages. */
+	#if defined(__FreeBSD__)
+	posix_memalign(&ctx->balloon_mem, user_param->cycle_buffer, balloon_size);
+	#else
+	if (user_param->use_hugepages) {
+		if (alloc_hugepage_region(ctx, &ctx->balloon_mem) != SUCCESS){
+			fprintf(stderr, "Failed to allocate hugepage region.\n");
+			return FAILURE;
+		}
+	} else if  (ctx->is_contig_supported == FAILURE) {
+		ctx->balloon_mem = memalign(user_param->cycle_buffer, balloon_size);
+	}
+	#endif
+
+	if (!ctx->balloon_mem) {
+		fprintf(stderr, "Couldn't allocate balloon memory\n");
+		return FAILURE;
+	}
+
+	/* Initialize the balloon buffer with random numbers */
+	for (i = 0; i < balloon_size; i++) {
+		((char*)ctx->balloon_mem)[i] = (char)rand();
+	}
+
+
+	return SUCCESS;
+}
+int create_balloons(struct pingpong_context *ctx, struct perftest_parameters *user_param)
+{
+	int i;
+
+	// Allocate balloon MRs
+	for (i = 0; i < user_param->balloon_mrs; i++) {
+		if (create_one_balloon_mr(ctx, user_param, i)) {
+			fprintf(stderr, "failed to create balloon mr\n");
+			return 1;
+		}
+	}
+
+	// Allocate balloon memory
+	if (create_balloon_memory(ctx, user_param)) {
+		fprintf(stderr, "failed to allocate balloon memory\n");
+		return 1;
+	}
+
+	return 0;
+}
+
+/******************************************************************************
+ *
+ ******************************************************************************/
 #define HUGEPAGE_ALIGN  (2*1024*1024)
 #define SHMAT_ADDR (void *)(0x0UL)
 #define SHMAT_FLAGS (0)
 
 #if !defined(__FreeBSD__)
-int alloc_hugepage_region (struct pingpong_context *ctx, int qp_index)
+int alloc_hugepage_region (struct pingpong_context *ctx, void **buf)
 {
 	int buf_size;
 	int alignment = (((ctx->cycle_buffer + HUGEPAGE_ALIGN -1) / HUGEPAGE_ALIGN) * HUGEPAGE_ALIGN);
@@ -1662,7 +1855,7 @@ int alloc_hugepage_region (struct pingpong_context *ctx, int qp_index)
 	}
 
 	/* attach shared memory */
-	ctx->buf[qp_index] = (void *) shmat(ctx->huge_shmid, SHMAT_ADDR, SHMAT_FLAGS);
+	(*buf) = (void *) shmat(ctx->huge_shmid, SHMAT_ADDR, SHMAT_FLAGS);
 	if (ctx->buf == (void *) -1) {
 		fprintf(stderr, "Failed to attach shared memory region\n");
 		return FAILURE;
@@ -1810,6 +2003,11 @@ int ctx_init(struct pingpong_context *ctx, struct perftest_parameters *user_para
 
 	if (create_mr(ctx, user_param)) {
 		fprintf(stderr, "Failed to create MR\n");
+		return FAILURE;
+	}
+
+	if (create_balloons(ctx, user_param)) {
+		fprintf(stderr, "Failed to create balloons\n");
 		return FAILURE;
 	}
 

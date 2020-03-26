@@ -196,6 +196,9 @@ struct pingpong_context {
 	int                                     credit_cnt;
 	int					cache_line_size;
 	int					cycle_buffer;
+	void					**balloon_buf;
+	struct ibv_mr				**balloon_mr;
+	void					*balloon_mem;
 	#ifdef HAVE_XRCD
 	struct ibv_xrcd				*xrc_domain;
 	int 					fd;
@@ -878,7 +881,7 @@ int create_mr(struct pingpong_context *ctx,
  * Return Value : SUCCESS, FAILURE.
  *
  */
-int alloc_hugepage_region (struct pingpong_context *ctx, int qp_index);
+int alloc_hugepage_region (struct pingpong_context *ctx, void **buf);
 
 /* run_iter_fs_rate
  *

@@ -514,6 +514,14 @@ static void usage(const char *argv0, VerbType verb, TestType tst, int connection
 		printf("        Note: in Latency under load test SW rate limit is forced\n");
 
 	}
+
+	printf("\n Ballooning Options:\n");
+	printf("      --balloon_mr=<value>");
+	printf(" Create additional unused MRs\n");
+
+	printf("      --balloon_mem=<size>");
+	printf(" Allocate <size> MB of balloon memory filled with random data\n");
+
 	#if defined HAVE_OOO_ATTR || defined HAVE_EXP_OOO_ATTR
 	printf("      --use_ooo ");
 	printf(" Use out of order data placement\n");
@@ -736,6 +744,8 @@ static void init_perftest_params(struct perftest_parameters *user_param)
 	user_param->is_exp_qp		= 0;
 	user_param->use_res_domain	= 0;
 	user_param->mr_per_qp		= 0;
+	user_param->balloon_mrs		= 0;
+	user_param->balloon_mem		= 0;
 	user_param->dlid		= 0;
 	user_param->traffic_class	= 0;
 	user_param->disable_fcs		= 0;
@@ -1900,6 +1910,8 @@ int parser(struct perftest_parameters *user_param,char *argv[], int argc)
 	static int use_ooo_flag = 0;
 	static int vlan_en = 0;
 	static int vlan_pcp_flag = 0;
+	static int balloon_mrs_flag = 0;
+	static int balloon_mem_flag = 0;
 
 	char *server_ip = NULL;
 	char *client_ip = NULL;
@@ -2026,6 +2038,8 @@ int parser(struct perftest_parameters *user_param,char *argv[], int argc)
 			{ .name = "perform_warm_up",	.has_arg = 0, .flag = &perform_warm_up_flag, .val = 1},
 			{ .name = "vlan_en",            .has_arg = 0, .flag = &vlan_en, .val = 1 },
 			{ .name = "vlan_pcp",		.has_arg = 1, .flag = &vlan_pcp_flag, .val = 1 },
+			{ .name = "balloon_mrs",	.has_arg = 1, .flag = &balloon_mrs_flag, .val = 1 },
+			{ .name = "balloon_mem",	.has_arg = 1, .flag = &balloon_mem_flag, .val = 1 },
 
 			#if defined HAVE_OOO_ATTR || defined HAVE_EXP_OOO_ATTR
 			{ .name = "use_ooo",		.has_arg = 0, .flag = &use_ooo_flag, .val = 1},
@@ -2491,6 +2505,22 @@ int parser(struct perftest_parameters *user_param,char *argv[], int argc)
 						return FAILURE;
 					}
 					vlan_pcp_flag = 0;
+				}
+				if (balloon_mrs_flag) {
+					user_param->balloon_mrs = strtol(optarg, NULL, 0);
+					if (user_param->balloon_mrs < 0) {
+						fprintf(stderr, "Invalid balloon_mrs value. Please set a number > 0\n");
+						return FAILURE;
+					}
+					balloon_mrs_flag = 0;
+				}
+				if (balloon_mem_flag) {
+				  user_param->balloon_mem = strtol(optarg, NULL, 0);
+				  if (user_param->balloon_mem < 0) {
+				    fprintf(stderr, "Invalid balloon_mem value. Please set a number > 0\n");
+				    return FAILURE;
+				  }
+				  balloon_mem_flag = 0;
 				}
 				break;
 
