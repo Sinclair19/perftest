@@ -43,6 +43,97 @@ struct perftest_parameters* duration_param;
 struct check_alive_data check_alive_data;
 
 /******************************************************************************
+ * Time measurements
+ ******************************************************************************/
+
+#define DECLARE_TIMESPEC_INTERVAL(name) \
+	struct timespec *time_##name##_start; \
+	struct timespec *time_##name##_end
+
+DECLARE_TIMESPEC_INTERVAL(qp_create);
+DECLARE_TIMESPEC_INTERVAL(qp_to_init);
+DECLARE_TIMESPEC_INTERVAL(qp_to_rtr);
+DECLARE_TIMESPEC_INTERVAL(qp_to_rts);
+DECLARE_TIMESPEC_INTERVAL(ah_create);
+DECLARE_TIMESPEC_INTERVAL(mr_create);
+DECLARE_TIMESPEC_INTERVAL(pd_create);
+DECLARE_TIMESPEC_INTERVAL(cq_create);
+
+static int init_time_structs(struct perftest_parameters *user_param)
+{
+#define ALLOCATE_TIMESPEC(name, n) ({ \
+		time_##name##_start = calloc(n, sizeof(struct timespec)); \
+		if (!time_##name##_start) { \
+			fprintf(stderr, "[%d] Failed to allocate memory\n", __LINE__); \
+			return FAILURE; \
+		} \
+		time_##name##_end = calloc(n, sizeof(struct timespec)); \
+		if (!time_##name##_end) { \
+			fprintf(stderr, "[%d] Failed to allocate memory\n", __LINE__); \
+			return FAILURE; \
+		} \
+	})
+
+	ALLOCATE_TIMESPEC(qp_create, user_param->num_of_qps);
+	ALLOCATE_TIMESPEC(qp_to_init, user_param->num_of_qps);
+	ALLOCATE_TIMESPEC(qp_to_rtr, user_param->num_of_qps);
+	ALLOCATE_TIMESPEC(qp_to_rts, user_param->num_of_qps);
+	ALLOCATE_TIMESPEC(ah_create, user_param->num_of_qps);
+	ALLOCATE_TIMESPEC(mr_create, user_param->balloon_mrs);
+	ALLOCATE_TIMESPEC(pd_create, 1);
+	ALLOCATE_TIMESPEC(cq_create, 1);
+
+#undef ALLOCATE_TIMESPEC
+	return 0;
+}
+
+static void time_remember(struct timespec *timer, int i)
+{
+	clock_gettime(CLOCK_MONOTONIC, timer + i);
+}
+
+struct timespec time_diff(struct timespec *start, struct timespec *end)
+{
+	struct timespec temp;
+	if ((end->tv_nsec - start->tv_nsec) < 0) {
+		temp.tv_sec = end->tv_sec - start->tv_sec - 1;
+		temp.tv_nsec = 1000000000 + end->tv_nsec - start->tv_nsec;
+	} else {
+		temp.tv_sec = end->tv_sec - start->tv_sec;
+		temp.tv_nsec = end->tv_nsec - start->tv_nsec;
+	}
+	return temp;
+}
+
+static void timer_dump(const char *timer_name, int i, struct timespec *start, struct timespec *end)
+{
+	struct timespec diff = time_diff(start, end);
+	long long unsigned nsec_diff = diff.tv_sec * 1000000000 + diff.tv_nsec;
+	printf("%s,%d,%llu\n", timer_name, i, nsec_diff);
+}
+
+#define xstr(s) str(s)
+#define str(s) #s
+#define TIMERS_DUMP(name, n) \
+	for (int i = 0; i < n; i++) \
+		timer_dump(str(name), i, time_##name##_start + i, time_##name##_end + i)
+
+static void time_dump(struct perftest_parameters *user_param)
+{
+	printf("START TIME DUMP\n");
+	printf("timer_name, iter, elapsed\n");
+	TIMERS_DUMP(qp_create, user_param->num_of_qps);
+	TIMERS_DUMP(qp_to_init, user_param->num_of_qps);
+	TIMERS_DUMP(qp_to_rtr, user_param->num_of_qps);
+	TIMERS_DUMP(qp_to_rts, user_param->num_of_qps);
+	TIMERS_DUMP(ah_create, user_param->num_of_qps);
+	TIMERS_DUMP(mr_create, user_param->balloon_mrs);
+	TIMERS_DUMP(pd_create, 1);
+	TIMERS_DUMP(cq_create, 1);
+	printf("END TIME DUMP\n");
+}
+
+/******************************************************************************
  * Beginning
  ******************************************************************************/
 #ifdef HAVE_CUDA
@@ -1257,6 +1348,8 @@ int destroy_ctx(struct pingpong_context *ctx,
 		counters_close(user_param->counter_ctx);
 	}
 
+	time_dump(user_param);
+
 	return test_result;
 }
 
@@ -1327,8 +1420,10 @@ int create_reg_cqs(struct pingpong_context *ctx,
 		   struct perftest_parameters *user_param,
 		   int tx_buffer_depth, int need_recv_cq)
 {
+	time_remember(time_cq_create_start, 0);
 	ctx->send_cq = ibv_create_cq(ctx->context,tx_buffer_depth *
 					user_param->num_of_qps, NULL, ctx->channel, user_param->eq_num);
+	time_remember(time_cq_create_end, 0);
 	if (!ctx->send_cq) {
 		fprintf(stderr, "Couldn't create CQ\n");
 		return FAILURE;
@@ -1817,10 +1912,12 @@ int create_balloons(struct pingpong_context *ctx, struct perftest_parameters *us
 
 	// Allocate balloon MRs
 	for (i = 0; i < user_param->balloon_mrs; i++) {
+		time_remember(time_mr_create_start, i);
 		if (create_one_balloon_mr(ctx, user_param, i)) {
 			fprintf(stderr, "failed to create balloon mr\n");
 			return 1;
 		}
+		time_remember(time_mr_create_end, i);
 	}
 
 	// Allocate balloon memory
@@ -1975,6 +2072,11 @@ int ctx_init(struct pingpong_context *ctx, struct perftest_parameters *user_para
 		ctx->is_contig_supported  = check_for_contig_pages_support(ctx->context);
 	#endif
 
+	if (init_time_structs(user_param)) {
+		fprintf(stderr, "Couldn't allocate timers\n");
+		return FAILURE;
+	}
+
 	/* Allocating an event channel if requested. */
 	if (user_param->use_event) {
 		ctx->channel = ibv_create_comp_channel(ctx->context);
@@ -1984,12 +2086,14 @@ int ctx_init(struct pingpong_context *ctx, struct perftest_parameters *user_para
 		}
 	}
 
+	time_remember(time_pd_create_start, 0);
 	/* Allocating the Protection domain. */
 	ctx->pd = ibv_alloc_pd(ctx->context);
 	if (!ctx->pd) {
 		fprintf(stderr, "Couldn't allocate PD\n");
 		return FAILURE;
 	}
+	time_remember(time_pd_create_end, 0);
 
 	#ifdef HAVE_ACCL_VERBS
 	if (user_param->use_res_domain) {
@@ -2088,10 +2192,12 @@ int ctx_init(struct pingpong_context *ctx, struct perftest_parameters *user_para
 
 	for (i=0; i < user_param->num_of_qps; i++) {
 
+		time_remember(time_qp_create_start, i);
 		if (create_qp_main(ctx, user_param, i, num_of_qps)) {
 			fprintf(stderr, "Failed to create QP.\n");
 			return FAILURE;
 		}
+		time_remember(time_qp_create_end, i);
 
 		if (user_param->work_rdma_cm == OFF) {
 			modify_qp_to_init(ctx, user_param, i, num_of_qps);
@@ -2127,6 +2233,7 @@ int modify_qp_to_init(struct pingpong_context *ctx,
 	#endif
 		init_flag = 0;
 
+	time_remember(time_qp_to_init_start, qp_index);
 	if(user_param->connection_type == DC) {
 		if ( !((!(user_param->duplex || user_param->tst == LAT) && (user_param->machine == SERVER) )
 					|| ((user_param->duplex || user_param->tst == LAT) && (qp_index >= num_of_qps)))) {
@@ -2143,6 +2250,7 @@ int modify_qp_to_init(struct pingpong_context *ctx,
 			return FAILURE;
 		}
 	}
+	time_remember(time_qp_to_init_end, qp_index);
 
 	return SUCCESS;
 }
@@ -2969,6 +3077,7 @@ int ctx_connect(struct pingpong_context *ctx,
 	}
 	for (i=0; i < user_param->num_of_qps; i++) {
 
+
 		if (user_param->connection_type == DC) {
 			if ( ((!(user_param->duplex || user_param->tst == LAT) && (user_param->machine == SERVER) )
 						|| ((user_param->duplex || user_param->tst == LAT) && (i >= user_param->num_of_qps/2)))) {
@@ -3002,6 +3111,7 @@ int ctx_connect(struct pingpong_context *ctx,
 		if ((i >= xrc_offset) && (user_param->use_xrc || user_param->connection_type == DC) && (user_param->duplex || user_param->tst == LAT))
 			xrc_offset = -1*xrc_offset;
 
+		time_remember(time_qp_to_rtr_start, i);
 		if(user_param->connection_type == DC) {
 			#ifdef HAVE_DC
 			if(ctx_modify_dc_qp_to_rtr(ctx->qp[i],&attr_ex,user_param,&dest[xrc_offset + i],&my_dest[i],i)) {
@@ -3015,6 +3125,8 @@ int ctx_connect(struct pingpong_context *ctx,
 				return FAILURE;
 			}
 		}
+		time_remember(time_qp_to_rtr_end, i);
+		time_remember(time_qp_to_rts_start, i);
 		if (user_param->tst == LAT || user_param->machine == CLIENT || user_param->duplex) {
 			if(user_param->connection_type == DC) {
 				#ifdef HAVE_DC
@@ -3041,7 +3153,9 @@ int ctx_connect(struct pingpong_context *ctx,
 				#endif
 			}
 		}
+		time_remember(time_qp_to_rts_end, i);
 
+		time_remember(time_ah_create_start, i);
 		if ((user_param->connection_type == UD || user_param->connection_type == DC || user_param->connection_type == SRD) &&
 				(user_param->tst == LAT || user_param->machine == CLIENT || user_param->duplex)) {
 
@@ -3057,6 +3171,7 @@ int ctx_connect(struct pingpong_context *ctx,
 				return FAILURE;
 			}
 		}
+		time_remember(time_ah_create_end, i);
 
 		if (user_param->rate_limit_type == HW_RATE_LIMIT) {
 			struct ibv_qp_attr qp_attr;
