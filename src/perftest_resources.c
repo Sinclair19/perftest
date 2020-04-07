@@ -1120,6 +1120,7 @@ void alloc_ctx(struct pingpong_context *ctx,struct perftest_parameters *user_par
 	* with reference to number of flows and number of QPs */
 	ctx->buff_size = INC(BUFF_SIZE(ctx->size, ctx->cycle_buffer),
 				 ctx->cache_line_size) * 2 * num_of_qps_factor * user_param->flows;
+	ctx->buff_size = BUFF_SIZE(user_param->min_buff_size, ctx->buff_size);
 	ctx->send_qp_buff_size = ctx->buff_size / num_of_qps_factor / 2;
 	ctx->flow_buff_size = ctx->send_qp_buff_size / user_param->flows;
 	user_param->buff_size = ctx->buff_size;

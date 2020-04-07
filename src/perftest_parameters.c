@@ -522,6 +522,9 @@ static void usage(const char *argv0, VerbType verb, TestType tst, int connection
 	printf("      --balloon_mem=<size>");
 	printf(" Allocate <size> MB of balloon memory filled with random data\n");
 
+	printf("      --min_buff_size=<size>");
+	printf(" Minimum buffer size in <size> KB\n");
+
 	#if defined HAVE_OOO_ATTR || defined HAVE_EXP_OOO_ATTR
 	printf("      --use_ooo ");
 	printf(" Use out of order data placement\n");
@@ -746,6 +749,7 @@ static void init_perftest_params(struct perftest_parameters *user_param)
 	user_param->mr_per_qp		= 0;
 	user_param->balloon_mrs		= 0;
 	user_param->balloon_mem		= 0;
+	user_param->min_buff_size	= 0;
 	user_param->send_lat_print	= 0;
 	user_param->dlid		= 0;
 	user_param->traffic_class	= 0;
@@ -1913,6 +1917,7 @@ int parser(struct perftest_parameters *user_param,char *argv[], int argc)
 	static int vlan_pcp_flag = 0;
 	static int balloon_mrs_flag = 0;
 	static int balloon_mem_flag = 0;
+	static int min_buff_size_flag = 0;
 	static int send_lat_print_flag = 0;
 
 	char *server_ip = NULL;
@@ -2042,6 +2047,7 @@ int parser(struct perftest_parameters *user_param,char *argv[], int argc)
 			{ .name = "vlan_pcp",		.has_arg = 1, .flag = &vlan_pcp_flag, .val = 1 },
 			{ .name = "balloon_mrs",	.has_arg = 1, .flag = &balloon_mrs_flag, .val = 1 },
 			{ .name = "balloon_mem",	.has_arg = 1, .flag = &balloon_mem_flag, .val = 1 },
+			{ .name = "min_buff_size",	.has_arg = 1, .flag = &min_buff_size_flag, .val = 1 },
 			{ .name = "send_lat_print",	.has_arg = 1, .flag = &send_lat_print_flag, .val = 1 },
 
 			#if defined HAVE_OOO_ATTR || defined HAVE_EXP_OOO_ATTR
@@ -2524,6 +2530,15 @@ int parser(struct perftest_parameters *user_param,char *argv[], int argc)
 						return FAILURE;
 					}
 					balloon_mem_flag = 0;
+				}
+				if (min_buff_size_flag) {
+					errno = 0;
+					user_param->min_buff_size = strtol(optarg, NULL, 0) * 1024;
+					if (errno != 0) {
+						fprintf(stderr, "Invalid min_buff_size value: %s\n", strerror(errno));
+						return FAILURE;
+					}
+					min_buff_size_flag = 0;
 				}
 				if (send_lat_print_flag) {
 					errno = 0;
