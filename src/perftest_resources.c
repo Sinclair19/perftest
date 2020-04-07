@@ -1847,6 +1847,9 @@ int create_one_balloon_mr(struct pingpong_context *ctx, struct perftest_paramete
 		return FAILURE;
 	}
 
+	if (ctx->is_contig_supported == SUCCESS)
+		ctx->balloon_buf[mr_index] = ctx->balloon_mr[mr_index]->addr;
+
 	/* Initialize buffer with random numbers except in WRITE_LAT test that it 0's */
 	if (!user_param->use_cuda) {
 		if (user_param->verb == WRITE && user_param->tst == LAT) {
