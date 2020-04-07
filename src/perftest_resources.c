@@ -117,7 +117,7 @@ static void timer_dump(const char *timer_name, int i, struct timespec *timers, l
 {
 	struct timespec *timer = timers + i;
 	long long unsigned nsec_diff = timer->tv_sec * 1000000000 + timer->tv_nsec;
-	if (nsec_diff < 0)
+	if (cutoff == 0 || nsec_diff < cutoff)
 		return;
 	printf("%s,%d,%llu\n", timer_name, i, nsec_diff);
 }
@@ -126,7 +126,7 @@ static void timer_dump(const char *timer_name, int i, struct timespec *timers, l
 #define str(s) #s
 #define TIMERS_DUMP(name, n) \
 	for (int i = 0; i < n; i++) \
-		timer_dump(str(name), i, time_##name, 0)
+		timer_dump(str(name), i, time_##name, 1)
 
 #define TIMERS_DUMP_CUTOFF(name, n, cutoff) \
 	for (int i = 0; i < n; i++) \
@@ -144,7 +144,7 @@ static void time_dump(struct perftest_parameters *user_param)
 	TIMERS_DUMP(mr_create, user_param->balloon_mrs);
 	TIMERS_DUMP(pd_create, 1);
 	TIMERS_DUMP(cq_create, 1);
-	TIMERS_DUMP_CUTOFF(send_lat, user_param->num_of_qps * user_param->iters, 30000000);
+	TIMERS_DUMP_CUTOFF(send_lat, user_param->num_of_qps * user_param->iters, user_param->send_lat_print);
 	printf("END TIME DUMP\n");
 }
 

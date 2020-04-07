@@ -746,6 +746,7 @@ static void init_perftest_params(struct perftest_parameters *user_param)
 	user_param->mr_per_qp		= 0;
 	user_param->balloon_mrs		= 0;
 	user_param->balloon_mem		= 0;
+	user_param->send_lat_print	= 0;
 	user_param->dlid		= 0;
 	user_param->traffic_class	= 0;
 	user_param->disable_fcs		= 0;
@@ -1912,6 +1913,7 @@ int parser(struct perftest_parameters *user_param,char *argv[], int argc)
 	static int vlan_pcp_flag = 0;
 	static int balloon_mrs_flag = 0;
 	static int balloon_mem_flag = 0;
+	static int send_lat_print_flag = 0;
 
 	char *server_ip = NULL;
 	char *client_ip = NULL;
@@ -2040,6 +2042,7 @@ int parser(struct perftest_parameters *user_param,char *argv[], int argc)
 			{ .name = "vlan_pcp",		.has_arg = 1, .flag = &vlan_pcp_flag, .val = 1 },
 			{ .name = "balloon_mrs",	.has_arg = 1, .flag = &balloon_mrs_flag, .val = 1 },
 			{ .name = "balloon_mem",	.has_arg = 1, .flag = &balloon_mem_flag, .val = 1 },
+			{ .name = "send_lat_print",	.has_arg = 1, .flag = &send_lat_print_flag, .val = 1 },
 
 			#if defined HAVE_OOO_ATTR || defined HAVE_EXP_OOO_ATTR
 			{ .name = "use_ooo",		.has_arg = 0, .flag = &use_ooo_flag, .val = 1},
@@ -2515,12 +2518,21 @@ int parser(struct perftest_parameters *user_param,char *argv[], int argc)
 					balloon_mrs_flag = 0;
 				}
 				if (balloon_mem_flag) {
-				  user_param->balloon_mem = strtol(optarg, NULL, 0);
-				  if (user_param->balloon_mem < 0) {
-				    fprintf(stderr, "Invalid balloon_mem value. Please set a number > 0\n");
-				    return FAILURE;
-				  }
-				  balloon_mem_flag = 0;
+					user_param->balloon_mem = strtol(optarg, NULL, 0);
+					if (user_param->balloon_mem < 0) {
+						fprintf(stderr, "Invalid balloon_mem value. Please set a number > 0\n");
+						return FAILURE;
+					}
+					balloon_mem_flag = 0;
+				}
+				if (send_lat_print_flag) {
+					errno = 0;
+					user_param->send_lat_print = strtoull(optarg, NULL, 0);
+					if (errno != 0) {
+						fprintf(stderr, "Invalid send_lat_print value: %s\n", strerror(errno));
+						return FAILURE;
+					}
+					send_lat_print_flag = 0;
 				}
 				break;
 

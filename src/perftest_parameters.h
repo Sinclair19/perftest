@@ -517,6 +517,7 @@ struct perftest_parameters {
 	uint32_t			vlan_pcp;
 	int				balloon_mrs;
 	int				balloon_mem;
+	unsigned long long int		send_lat_print;
 	void 				(*print_eth_func)(void*);
 	struct counter_context		*counter_ctx;
 
