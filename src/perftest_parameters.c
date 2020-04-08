@@ -525,6 +525,9 @@ static void usage(const char *argv0, VerbType verb, TestType tst, int connection
 	printf("      --min_buff_size=<size>");
 	printf(" Minimum buffer size in <size> KB\n");
 
+	printf("      --time_dump");
+	printf(" Weather dump timing information\n");
+
 	#if defined HAVE_OOO_ATTR || defined HAVE_EXP_OOO_ATTR
 	printf("      --use_ooo ");
 	printf(" Use out of order data placement\n");
@@ -751,6 +754,7 @@ static void init_perftest_params(struct perftest_parameters *user_param)
 	user_param->balloon_mem		= 0;
 	user_param->min_buff_size	= 0;
 	user_param->send_lat_print	= 0;
+	user_param->time_dump		= 0;
 	user_param->dlid		= 0;
 	user_param->traffic_class	= 0;
 	user_param->disable_fcs		= 0;
@@ -1918,6 +1922,7 @@ int parser(struct perftest_parameters *user_param,char *argv[], int argc)
 	static int balloon_mrs_flag = 0;
 	static int balloon_mem_flag = 0;
 	static int min_buff_size_flag = 0;
+	static int time_dump_flag = 0;
 	static int send_lat_print_flag = 0;
 
 	char *server_ip = NULL;
@@ -2049,6 +2054,7 @@ int parser(struct perftest_parameters *user_param,char *argv[], int argc)
 			{ .name = "balloon_mem",	.has_arg = 1, .flag = &balloon_mem_flag, .val = 1 },
 			{ .name = "min_buff_size",	.has_arg = 1, .flag = &min_buff_size_flag, .val = 1 },
 			{ .name = "send_lat_print",	.has_arg = 1, .flag = &send_lat_print_flag, .val = 1 },
+			{ .name = "time_dump",		.has_arg = 0, .flag = &time_dump_flag, .val = 1 },
 
 			#if defined HAVE_OOO_ATTR || defined HAVE_EXP_OOO_ATTR
 			{ .name = "use_ooo",		.has_arg = 0, .flag = &use_ooo_flag, .val = 1},
@@ -2530,6 +2536,10 @@ int parser(struct perftest_parameters *user_param,char *argv[], int argc)
 						return FAILURE;
 					}
 					balloon_mem_flag = 0;
+				}
+				if (time_dump_flag) {
+					user_param->time_dump = 1;
+					time_dump_flag = 0;
 				}
 				if (min_buff_size_flag) {
 					errno = 0;

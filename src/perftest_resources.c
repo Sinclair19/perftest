@@ -134,6 +134,9 @@ static void timer_dump(const char *timer_name, int i, struct timespec *timers, l
 
 static void time_dump(struct perftest_parameters *user_param)
 {
+	if (!user_param->time_dump)
+		return;
+
 	printf("START TIME DUMP\n");
 	printf("timer_name, iter, elapsed\n");
 	TIMERS_DUMP(qp_create, user_param->num_of_qps);
