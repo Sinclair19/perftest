@@ -168,12 +168,13 @@ static void timer_dump(const char *timer_name, int i, struct timespec *timers, l
 	for (int i = 0; i < n; i++) \
 		timer_dump(str(name), i, time_##name, cutoff)
 
-static void time_dump(struct perftest_parameters *user_param)
+static void time_dump(struct pingpong_context *ctx, struct perftest_parameters *user_param)
 {
 	if (!user_param->time_dump)
 		return;
 
 	sleep(1);
+	printf("buff_size = %lu\n", ctx->buff_size);
 	printf("START TIME DUMP\n");
 	printf("timer_name, iter, elapsed\n");
 	TIMERS_DUMP(qp_create, user_param->num_of_qps);
@@ -1404,7 +1405,7 @@ int destroy_ctx(struct pingpong_context *ctx,
 		counters_close(user_param->counter_ctx);
 	}
 
-	time_dump(user_param);
+	time_dump(ctx, user_param);
 
 	return test_result;
 }
