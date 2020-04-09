@@ -59,6 +59,10 @@ DECLARE_TIMESPEC_INTERVAL(pd_create);
 DECLARE_TIMESPEC_INTERVAL(cq_create);
 DECLARE_TIMESPEC_INTERVAL(tail_latency);
 DECLARE_TIMESPEC_INTERVAL(send_lat);
+DECLARE_TIMESPEC_INTERVAL(send_lat_max);
+
+static const int bucket_size = 256;
+static const int send_lat_len = 128 * bucket_size;
 
 static int init_time_structs(struct perftest_parameters *user_param)
 {
@@ -78,7 +82,8 @@ static int init_time_structs(struct perftest_parameters *user_param)
 	ALLOCATE_TIMESPEC(mr_create, user_param->balloon_mrs);
 	ALLOCATE_TIMESPEC(pd_create, 1);
 	ALLOCATE_TIMESPEC(cq_create, 1);
-	ALLOCATE_TIMESPEC(send_lat, user_param->num_of_qps * user_param->iters);
+	ALLOCATE_TIMESPEC(send_lat, send_lat_len);
+	ALLOCATE_TIMESPEC(send_lat_max, send_lat_len);
 
 #undef ALLOCATE_TIMESPEC
 	return 0;
@@ -100,6 +105,21 @@ void time_diff(struct timespec *start, struct timespec *end, struct timespec *re
 	}
 }
 
+int time_cmp(struct timespec *a, struct timespec *b)
+{
+	if (a->tv_sec > b->tv_sec) {
+		return 1;
+	} else if (a->tv_sec < b->tv_sec) {
+		return -1;
+	} else if (a->tv_nsec > b->tv_nsec) {
+		return 1;
+	} else if (a->tv_nsec < b->tv_nsec) {
+		return -1;
+	} else {
+		return 0;
+	}
+}
+
 #define TIME_START(name, i) ({ \
 		struct timespec *timer = time_##name + i; \
 		time_remember(timer); \
@@ -111,6 +131,22 @@ void time_diff(struct timespec *start, struct timespec *end, struct timespec *re
 		time_remember(&end); \
 		time_diff(timer, &end, &diff); \
 		*timer = diff; \
+	})
+
+#define TIME_START_MAX(name, qpn, i) ({ \
+		int offs = qpn * bucket_size + (i % bucket_size); \
+		struct timespec *timer = time_##name + offs; \
+		time_remember(timer); \
+	})
+
+#define TIME_END_MAX(name, qpn, i) ({ \
+		int offs = qpn * bucket_size + (i % bucket_size); \
+		TIME_END(name, offs); \
+		struct timespec *timer = time_##name + offs; \
+		struct timespec *timer_max = time_##name##_max + offs; \
+		if (time_cmp(timer, timer_max) > 0) { \
+			*timer_max = *timer; \
+		} \
 	})
 
 static void timer_dump(const char *timer_name, int i, struct timespec *timers, long long unsigned cutoff)
@@ -137,6 +173,7 @@ static void time_dump(struct perftest_parameters *user_param)
 	if (!user_param->time_dump)
 		return;
 
+	sleep(1);
 	printf("START TIME DUMP\n");
 	printf("timer_name, iter, elapsed\n");
 	TIMERS_DUMP(qp_create, user_param->num_of_qps);
@@ -147,7 +184,7 @@ static void time_dump(struct perftest_parameters *user_param)
 	TIMERS_DUMP(mr_create, user_param->balloon_mrs);
 	TIMERS_DUMP(pd_create, 1);
 	TIMERS_DUMP(cq_create, 1);
-	TIMERS_DUMP_CUTOFF(send_lat, user_param->num_of_qps * user_param->iters, user_param->send_lat_print);
+	TIMERS_DUMP(send_lat_max, send_lat_len);
 	printf("END TIME DUMP\n");
 }
 
@@ -4899,7 +4936,7 @@ int run_iter_bi(struct pingpong_context *ctx,
 				if (user_param->test_type == DURATION && duration_param->state == END_STATE)
 					break;
 
-				TIME_START(send_lat, user_param->iters * index + ctx->scnt[index]);
+				TIME_START_MAX(send_lat, index, ctx->scnt[index]);
 				#ifdef HAVE_VERBS_EXP
 				if (user_param->use_exp == 1)
 					err = (ctx->exp_post_send_func_pointer)(ctx->qp[index],
@@ -5102,7 +5139,7 @@ int run_iter_bi(struct pingpong_context *ctx,
 					tot_scredit--;
 				} else  {
 					totccnt += user_param->cq_mod;
-					TIME_END(send_lat, user_param->iters * (int)wc_tx[i].wr_id + ctx->ccnt[(int)wc_tx[i].wr_id]);
+					TIME_END_MAX(send_lat, (int)wc_tx[i].wr_id, ctx->ccnt[(int)wc_tx[i].wr_id]);
 					ctx->ccnt[(int)wc_tx[i].wr_id] += user_param->cq_mod;
 
 					if (user_param->noPeak == OFF) {
