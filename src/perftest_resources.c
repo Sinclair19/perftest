@@ -1907,6 +1907,8 @@ int create_one_balloon_mr(struct pingpong_context *ctx, struct perftest_paramete
 	if (ctx->is_contig_supported == SUCCESS)
 		ctx->balloon_buf[mr_index] = ctx->balloon_mr[mr_index]->addr;
 
+	TIME_END(mr_create, mr_index);
+
 	/* Initialize buffer with random numbers except in WRITE_LAT test that it 0's */
 	if (!user_param->use_cuda) {
 		if (user_param->verb == WRITE && user_param->tst == LAT) {
@@ -1977,7 +1979,6 @@ int create_balloons(struct pingpong_context *ctx, struct perftest_parameters *us
 			fprintf(stderr, "failed to create balloon mr\n");
 			return 1;
 		}
-		TIME_END(mr_create, i);
 	}
 
 	// Allocate balloon memory
