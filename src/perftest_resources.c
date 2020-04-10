@@ -1819,6 +1819,13 @@ int create_one_balloon_mr(struct pingpong_context *ctx, struct perftest_paramete
 {
 	int i;
 	int flags = IBV_ACCESS_LOCAL_WRITE;
+	int buff_size;
+
+	if (user_param->balloon_mr_size > 0) {
+		buff_size = user_param->balloon_mr_size;
+	} else {
+		buff_size = ctx->buff_size;
+	}
 
 #ifdef HAVE_VERBS_EXP
 	struct ibv_exp_reg_mr_in reg_mr_exp_in;
@@ -1833,16 +1840,16 @@ int create_one_balloon_mr(struct pingpong_context *ctx, struct perftest_paramete
 	/* Allocating buffer for data, in case driver not support contig pages. */
 	if (ctx->is_contig_supported == FAILURE) {
 		#if defined(__FreeBSD__)
-		posix_memalign(&ctx->balloon_buf[mr_index], user_param->cycle_buffer, ctx->buff_size);
+		posix_memalign(&ctx->balloon_buf[mr_index], user_param->cycle_buffer, buff_size);
 		#else
 		if (user_param->use_hugepages) {
 			if (alloc_hugepage_region(ctx, &ctx->balloon_buf[mr_index]) != SUCCESS){
 				fprintf(stderr, "Failed to allocate hugepage region.\n");
 				return FAILURE;
 			}
-			memset(ctx->balloon_buf[mr_index], 0, ctx->buff_size);
+			memset(ctx->balloon_buf[mr_index], 0, buff_size);
 		} else if  (ctx->is_contig_supported == FAILURE) {
-			ctx->balloon_buf[mr_index] = memalign(user_param->cycle_buffer, ctx->buff_size);
+			ctx->balloon_buf[mr_index] = memalign(user_param->cycle_buffer, buff_size);
 		}
 		#endif
 		if (!ctx->balloon_buf[mr_index]) {
@@ -1850,7 +1857,7 @@ int create_one_balloon_mr(struct pingpong_context *ctx, struct perftest_paramete
 			return FAILURE;
 		}
 
-		memset(ctx->balloon_buf[mr_index], 0, ctx->buff_size);
+		memset(ctx->balloon_buf[mr_index], 0, buff_size);
 	} else {
 		ctx->balloon_buf[mr_index] = NULL;
 		#ifdef HAVE_VERBS_EXP
@@ -1887,16 +1894,16 @@ int create_one_balloon_mr(struct pingpong_context *ctx, struct perftest_paramete
 	if (ctx->is_contig_supported == SUCCESS || user_param->use_odp) {
 		reg_mr_exp_in.pd = ctx->pd;
 		reg_mr_exp_in.addr = ctx->balloon_buf[mr_index];
-		reg_mr_exp_in.length = ctx->buff_size;
+		reg_mr_exp_in.length = buff_size;
 		reg_mr_exp_in.exp_access = exp_flags;
 		reg_mr_exp_in.comp_mask = 0;
 
 		ctx->balloon_mr[mr_index] = ibv_exp_reg_mr(&reg_mr_exp_in);
 	}
 	else
-		ctx->balloon_mr[mr_index] = ibv_reg_mr(ctx->pd, ctx->balloon_buf[mr_index], ctx->buff_size, flags);
+		ctx->balloon_mr[mr_index] = ibv_reg_mr(ctx->pd, ctx->balloon_buf[mr_index], buff_size, flags);
 #else
-	ctx->balloon_mr[mr_index] = ibv_reg_mr(ctx->pd, ctx->balloon_buf[mr_index], ctx->buff_size, flags);
+	ctx->balloon_mr[mr_index] = ibv_reg_mr(ctx->pd, ctx->balloon_buf[mr_index], buff_size, flags);
 #endif
 
 	if (!ctx->balloon_mr[mr_index]) {
@@ -1912,9 +1919,9 @@ int create_one_balloon_mr(struct pingpong_context *ctx, struct perftest_paramete
 	/* Initialize buffer with random numbers except in WRITE_LAT test that it 0's */
 	if (!user_param->use_cuda) {
 		if (user_param->verb == WRITE && user_param->tst == LAT) {
-			memset(ctx->balloon_buf[mr_index], 0, ctx->buff_size);
+			memset(ctx->balloon_buf[mr_index], 0, buff_size);
 		} else {
-			for (i = 0; i < ctx->buff_size; i++) {
+			for (i = 0; i < buff_size; i+=128) {
 				((char*)ctx->balloon_buf[mr_index])[i] = (char)rand();
 			}
 		}

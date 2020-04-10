@@ -516,6 +516,7 @@ struct perftest_parameters {
 	int                             vlan_en;
 	uint32_t			vlan_pcp;
 	int				balloon_mrs;
+	int				balloon_mr_size;
 	int				balloon_mem;
 	int				time_dump;
 	int				min_buff_size;
