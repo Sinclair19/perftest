@@ -2535,7 +2535,7 @@ int parser(struct perftest_parameters *user_param,char *argv[], int argc)
 					balloon_mrs_flag = 0;
 				}
 				if (balloon_mr_size_flag) {
-					user_param->balloon_mr_size = strtol(optarg, NULL, 0) * 1024;
+					user_param->balloon_mr_size = strtoul(optarg, NULL, 0) * 1024;
 					if (user_param->balloon_mr_size < 0) {
 						fprintf(stderr, "Invalid balloon_mr_size value. Please set a number > 0\n");
 						return FAILURE;

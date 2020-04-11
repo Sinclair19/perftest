@@ -1819,7 +1819,7 @@ int create_one_balloon_mr(struct pingpong_context *ctx, struct perftest_paramete
 {
 	int i;
 	int flags = IBV_ACCESS_LOCAL_WRITE;
-	int buff_size;
+	size_t buff_size;
 
 	if (user_param->balloon_mr_size > 0) {
 		buff_size = user_param->balloon_mr_size;
@@ -1968,7 +1968,7 @@ int create_balloon_memory(struct pingpong_context *ctx, struct perftest_paramete
 	}
 
 	/* Initialize the balloon buffer with random numbers */
-	for (i = 0; i < balloon_size; i++) {
+	for (i = 0; i < balloon_size; i+=1024) {
 		((char*)ctx->balloon_mem)[i] = (char)rand();
 	}
 
