@@ -132,6 +132,8 @@
  * Perftest resources Structures and data types.
  ******************************************************************************/
 
+extern struct perftest_parameters* duration_param;
+
 /* Represents RDMA CM node with needed information */
 struct cma_node {
 	struct rdma_cm_id *cma_id;
